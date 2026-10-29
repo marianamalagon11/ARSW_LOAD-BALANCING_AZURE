@@ -484,9 +484,104 @@ Para cumplir también el criterio de CPU harían falta, o más nodos de los que 
 
 ### VM4 creada
 
+Se agregó un cuarto nodo, `VM4`, en la zona de disponibilidad 1, con IP privada `10.1.0.7` y el mismo tamaño `Standard_B1ls`.
+
+El punto a destacar es que **la incorporación se hizo en caliente**: se creó la interfaz de red ya asociada al `SCALABILITY_LAB_BACKEND_POOL`, y en cuanto el health probe detectó el puerto 3000 escuchando, el balanceador empezó a enviarle tráfico. **No hubo que detener el servicio, ni cambiar la IP `20.48.168.44`, ni modificar la regla de balanceo, ni tocar nada del lado del cliente.** Esa es, en la práctica, la propiedad que define al escalamiento horizontal.
+
+![VM4 en Canada Central zona 1](images/entrega/part2/17-vm4-zona1.png)
+
+Backend pool con los cuatro nodos registrados y en ejecución:
+
+![Backend pool con VM1, VM2, VM3 y VM4](images/entrega/part2/18-backend-pool-4vms.png)
+
 ### Prueba de newman con 4 procesos en paralelo
 
+Cuatro procesos simultáneos, 10 iteraciones cada uno, contra los 4 nodos.
+
+| Métrica | Ejec. 1 | Ejec. 2 | Ejec. 3 | Ejec. 4 |
+|---|---|---|---|---|
+| Iteraciones | 10 | 10 | 10 | 10 |
+| **Fallidas** | **0** | **0** | **0** | **0** |
+| Duración total | 2m 45.8s | 2m 25.9s | 2m 4.5s | 2m 3.3s |
+| Tiempo promedio | 16.4s | 14.5s | 12.3s | 12.2s |
+| Mínimo | 15.9s | 14.4s | 12.2s | 12.1s |
+| Máximo | 18.0s | 14.7s | 12.6s | 12.5s |
+| Desviación estándar | 563 ms | 98 ms | 89 ms | 117 ms |
+
+**Tasa de éxito: 40 de 40 peticiones, 100 %.**
+
+#### Distribución de la carga
+
+| VM | Zona | Peticiones atendidas |
+|---|---|---|
+| VM1 | 1 | 10 |
+| VM2 | 2 | 10 |
+| VM3 | 3 | 10 |
+| VM4 | 1 | 10 |
+
+Esta vez el reparto fue **perfecto**: cada proceso de newman estableció su propia conexión TCP y el hash de 5-tupla la asignó a un nodo distinto. Con 4 conexiones y 4 backends se ejercitó el 100 % del pool, frente al 66 % de la prueba anterior, donde 2 conexiones solo alcanzaron 2 de 3 nodos.
+
+Esto confirma lo analizado en la pregunta 4: **el paralelismo efectivo lo determina el número de conexiones del cliente**, no el tamaño del backend pool.
+
+#### Comparación entre las dos pruebas
+
+| | Prueba con 2 procesos | Prueba con 4 procesos |
+|---|---|---|
+| Nodos disponibles | 3 | 4 |
+| Peticiones totales | 20 | **40** |
+| Peticiones fallidas | 0 | **0** |
+| Tasa de éxito | 100 % | **100 %** |
+| Tiempo de respuesta | 12.3s y 12.7s | 12.2s a 16.4s |
+| Nodos efectivamente usados | 2 de 3 (66 %) | **4 de 4 (100 %)** |
+| Pico de CPU | 95.7 % y 95.1 % | 95.9 %, 90.2 %, 96.0 %, 96.2 % |
+
+**Al duplicar la carga, la tasa de éxito se mantuvo en el 100 % y el tiempo de respuesta se conservó en el mismo orden de magnitud.** El sistema absorbió el doble de trabajo sin degradarse de forma apreciable.
+
+La variación entre 12.2s y 16.4s tiene una explicación plausible: VM1 y VM3 ya habían ejecutado la prueba anterior y tenían parte de sus créditos de ráfaga consumidos, mientras que VM2 y VM4 llegaban en reposo. No se verificó de forma concluyente a qué nodo fue cada proceso, así que queda como hipótesis.
+
+#### Por qué aumenta la tasa de éxito con escalamiento horizontal
+
+Tres razones, en orden de importancia:
+
+1. **La capacidad crece con los nodos.** Cada VM aporta un núcleo completo. Como la aplicación es monohilo y CPU-bound, cada nodo atiende una petición a la vez de forma eficiente. Con 4 nodos hay 4 peticiones en curso simultáneamente, cada una a velocidad plena.
+
+2. **Sin escalamiento horizontal, la carga se serializa.** En una sola máquina, las 40 peticiones competirían por el mismo núcleo: el event loop de Node las encolaría y cada una tardaría tanto como la suma de las que tiene delante. A 12 segundos por petición, las últimas esperarían varios minutos y muchas morirían por timeout del cliente. El fallo no viene de que el servidor rechace, sino de que no alcanza a responder a tiempo.
+
+3. **Los fallos quedan aislados.** Si un nodo se cae o se satura, el health probe lo saca de rotación en 10 segundos (2 fallos × 5 s) y sus peticiones se redistribuyen. En una sola máquina, su caída es la caída del sistema completo.
+
+El contraste con el escalamiento vertical es claro: subir de `B1ls` a `B2ms` multiplica los recursos de **una** máquina, pero mantiene el punto único de falla y choca contra el techo del tamaño más grande disponible. Agregar nodos no tiene ese techo, y además permite repartirlos en zonas de disponibilidad distintas, lo que añade tolerancia a fallos de centro de datos.
+
 ### Consumo de CPU de las 4 VMs
+
+Métrica *Percentage CPU*, agregación máximo, muestreo por minuto, durante la prueba con 4 procesos.
+
+| VM | Zona | Pico de CPU |
+|---|---|---|
+| VM1 | 1 | **95.9 %** |
+| VM2 | 2 | **90.2 %** |
+| VM3 | 3 | **96.0 %** |
+| VM4 | 1 | **96.2 %** |
+
+Serie por minuto:
+
+```
+VM1:   0.4   0.4  95.9  95.5
+VM2:  56.2  90.2  89.0
+VM3:  32.7  96.0  93.6   0.4
+VM4:  47.4  28.9  96.2  96.2  55.1  0.4
+```
+
+![CPU máxima de VM1 durante la prueba con 4 procesos](images/entrega/part2/19-cpu-4x-vm1.png)
+
+![CPU máxima de VM2 durante la prueba con 4 procesos](images/entrega/part2/20-cpu-4x-vm2.png)
+
+![CPU máxima de VM3 durante la prueba con 4 procesos](images/entrega/part2/21-cpu-4x-vm3.png)
+
+![CPU máxima de VM4 durante la prueba con 4 procesos](images/entrega/part2/22-cpu-4x-vm4.png)
+
+Las cuatro máquinas se saturaron de forma prácticamente simultánea, lo que confirma que la carga se repartió de manera uniforme. Ninguna quedó ociosa, a diferencia de VM2 en la prueba anterior. En las gráficas se aprecia además el pico menor y anterior de la prueba con 2 procesos, donde solo VM1 y VM3 registraron actividad.
+
+El criterio de CPU por debajo del 70 % del escenario de calidad **sigue sin cumplirse**, y es coherente: cada nodo tiene un solo vCPU y una petición CPU-bound basta para saturarlo. Agregar nodos aumenta el **throughput** del sistema y su disponibilidad, pero no reduce el uso de CPU de cada nodo individual. Para bajar del 70 % harían falta más nodos que peticiones concurrentes, VMs con varios núcleos, o corregir el algoritmo de Fibonacci, que es la causa de fondo.
 
 ## Preguntas: Parte 2
 
