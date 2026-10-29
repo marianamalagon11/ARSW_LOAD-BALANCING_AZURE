@@ -148,6 +148,10 @@ El enunciado es de 2019 y la suscripción usada es *Azure for Students*, lo que 
 
 Ninguna altera la arquitectura evaluada: sigue siendo un balanceador público que distribuye tráfico entre nodos idénticos repartidos en zonas de disponibilidad distintas.
 
+## Video de la demostración
+
+Grabación mostrando la infraestructura desplegada y la aplicación funcionando a través del balanceador de carga: [video/grabacion-parte2.mp4](video/grabacion-parte2.mp4)
+
 ## Evidencias: Parte 2
 
 ### Grupo de recursos
