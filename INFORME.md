@@ -23,6 +23,7 @@
   - [Checklist A: Balanceador de carga y red](#checklist-a-balanceador-de-carga-y-red)
   - [Checklist B: Máquinas virtuales (nodos)](#checklist-b-máquinas-virtuales-nodos)
   - [Checklist C: Pruebas de la infraestructura](#checklist-c-pruebas-de-la-infraestructura)
+  - [Desviaciones respecto a la guía](#desviaciones-respecto-a-la-guía)
   - [Evidencias](#evidencias-parte-2)
   - [Preguntas](#preguntas-parte-2)
 - [Diagrama de despliegue](#diagrama-de-despliegue)
@@ -120,12 +121,6 @@ newman run ARSW_LOAD-BALANCING_AZURE.postman_collection.json -e "[ARSW_LOAD-BALA
 ---
 
 # Parte 2: Escalabilidad horizontal
-
-**Antes de empezar**
-- [ ] Eliminar el grupo de recursos de la Parte 1 (o usar uno limpio) para evitar cobros adicionales
-- [ ] Guardar los resultados de la Parte 1 antes de borrarla: se necesitan para el informe comparativo
-- [ ] Tener la **llave SSH pública** (`~/.ssh/id_rsa.pub`); si no existe, generarla con `ssh-keygen -t rsa -b 4096`
-- [ ] Tener `newman` instalado en la máquina local: `npm install newman -g`
 
 **Nombres de los recursos** (tomados de las imágenes guía del enunciado):
 
@@ -320,35 +315,170 @@ newman run ARSW_LOAD-BALANCING_AZURE.postman_collection.json -e "[ARSW_LOAD-BALA
 newman run ARSW_LOAD-BALANCING_AZURE.postman_collection.json -e "[ARSW_LOAD-BALANCING_AZURE].postman_environment.json" -n 10
 ```
 
+## Desviaciones respecto a la guía
+
+El enunciado es de 2019 y la suscripción usada es *Azure for Students*. Estas son las diferencias entre lo que pide la guía y lo que se pudo implementar, con su justificación técnica.
+
+| Aspecto | Guía | Implementado | Razón |
+|---|---|---|---|
+| Región | North Europe | **Canada Central** | Azure aplica a la suscripción la política `Allowed resource deployment regions` (efecto *Denegar*), que la limita a 5 regiones: `southcentralus`, `northcentralus`, `canadacentral`, `brazilsouth` y `chilecentral`. De esas, solo Canada Central y Chile Central ofrecen `Standard_B1ls` con las 3 zonas de disponibilidad. |
+| IP pública por VM | Una IP pública Standard por VM | **VMs sin IP pública** | La suscripción tiene un límite de 3 IPs públicas por región y el balanceador consume una. Las VMs obtienen salida a internet mediante el SNAT saliente del Load Balancer Standard, verificado con `curl` (HTTP 200). La entrada sigue siendo exclusivamente por el balanceador, que es lo que exige la arquitectura. |
+| Imagen del SO | Ubuntu Server 18.04 LTS | **Ubuntu Server 22.04 LTS** | La 18.04 llegó a fin de vida y ya no se publica en el Marketplace. |
+| Gestor del proceso | `forever` | **Servicio `systemd`** | La instalación se automatizó con `az vm run-command`, que es no interactivo. `systemd` cumple la misma función que `forever` (mantener el proceso vivo al cerrar la sesión) y además lo reinicia automáticamente si falla. |
+| Subred | Con acceso de salida predeterminado | **Subred privada** | Desde el 31/03/2026 Azure crea las subredes como privadas por defecto. No afecta el funcionamiento porque la salida se resuelve por el balanceador. |
+| SKU del balanceador | Basic o Standard | **Standard** | Microsoft retiró el SKU Basic el 30/09/2025. Standard es además el único que soporta zonas de disponibilidad. |
+
+Ninguna de estas desviaciones altera la arquitectura evaluada: sigue siendo un balanceador de carga público que distribuye tráfico entre nodos idénticos repartidos en 3 zonas de disponibilidad.
+
 ## Evidencias: Parte 2
 
-### Load Balancer creado
+### Grupo de recursos
+
+![Grupo de recursos SCALABILITY_LAB en Canada Central](images/entrega/part2/00-resource-group.png)
+
+### Virtual Network
+
+![Red virtual con espacio de direcciones 10.1.0.0/16](images/entrega/part2/01-virtual-network.png)
+
+### Subnet
+
+![Subred SCALABILITY_LAB_SUBNET con rango 10.1.0.0/24](images/entrega/part2/02-subnet.png)
+
+### Load Balancer
+
+![Balanceador Standard con IP de frontend 20.48.168.44](images/entrega/part2/03-load-balancer.png)
 
 ### Backend Pool
 
+![Backend pool con VM1, VM2 y VM3 en zonas 1, 2 y 3](images/entrega/part2/04-backend-pool.png)
+
 ### Health Probe
+
+![Health probe TCP sobre el puerto 3000 cada 5 segundos](images/entrega/part2/05-health-probe.png)
 
 ### Load Balancing Rule
 
-### Virtual Network y Subnet
+![Regla de balanceo TCP/80 hacia TCP/3000](images/entrega/part2/06-load-balancing-rule.png)
 
 ### Network Security Group
 
+![NSG con las reglas de entrada SSH 22 y Port_3000](images/entrega/part2/07-network-security-group.png)
+
 ### VM1 (zona 1)
+
+![VM1 en Canada Central zona 1, Standard B1ls](images/entrega/part2/08-vm1-zona1.png)
 
 ### VM2 (zona 2)
 
+![VM2 en Canada Central zona 2, Standard B1ls](images/entrega/part2/09-vm2-zona2.png)
+
 ### VM3 (zona 3)
+
+![VM3 en Canada Central zona 3, Standard B1ls](images/entrega/part2/10-vm3-zona3.png)
 
 ### Aplicación instalada en las VMs
 
-### Backend Pool con las VMs asociadas
-
 ### Verificación funcional del balanceador
+
+![Respuesta del balanceador en /fibonacci/6](images/entrega/part2/12-balanceador-funcionando.png)
 
 ### Prueba de newman con 2 procesos en paralelo
 
+Comando ejecutado desde `FibonacciApp/postman/part2`, con `loadbalancer = 20.48.168.44`:
+
+```
+newman run ARSW_LOAD-BALANCING_AZURE.postman_collection.json -e "[ARSW_LOAD-BALANCING_AZURE].postman_environment.json" -n 10   (x2 en paralelo)
+```
+
+| Métrica | Ejecución 1 | Ejecución 2 |
+|---|---|---|
+| Iteraciones ejecutadas | 10 | 10 |
+| Peticiones | 10 | 10 |
+| **Fallidas** | **0** | **0** |
+| Duración total | 2m 4.4s | 2m 7.9s |
+| Tiempo de respuesta promedio | 12.3s | 12.7s |
+| Mínimo | 12.2s | 12.2s |
+| Máximo | 12.4s | 13.5s |
+| Desviación estándar | 54 ms | 458 ms |
+| Datos recibidos | 2.09 MB | 2.09 MB |
+
+**Tasa de éxito: 20 de 20 peticiones, 100%.**
+
+#### Distribución real de la carga
+
+Contando en los logs de cada VM (`journalctl -u fibonacci | grep 'calculate 1000000'`) cuántas peticiones pesadas atendió cada nodo:
+
+| VM | Zona | Peticiones `n=1000000` atendidas |
+|---|---|---|
+| VM1 | 1 | 10 |
+| VM2 | 2 | 1 |
+| VM3 | 3 | 10 |
+
+Cada proceso de newman quedó fijado a **una sola VM** durante sus 10 iteraciones. Esto no es un defecto de la configuración: Azure Load Balancer distribuye mediante un **hash de 5-tupla** (IP origen, puerto origen, IP destino, puerto destino, protocolo) que se evalúa **por conexión TCP**, no por petición. Como newman mantiene la conexión HTTP viva (keep-alive) durante toda su ejecución, las 10 peticiones viajan por el mismo socket y aterrizan siempre en el mismo backend.
+
+La consecuencia práctica es que **el número de nodos que se ejercitan está acotado por el número de conexiones TCP del cliente**, no por el tamaño del backend pool. Con 2 procesos solo se usaron 2 de las 3 VMs.
+
+Esto se verificó por contraste: al lanzar 18 peticiones con `--no-keepalive`, es decir, abriendo una conexión nueva cada vez, el reparto fue **exactamente 6, 6 y 6** entre VM1, VM2 y VM3.
+
+| Escenario | VM1 | VM2 | VM3 |
+|---|---|---|---|
+| 18 peticiones, conexión nueva cada una | 6 | 6 | 6 |
+| 15 peticiones reutilizando conexión | 0 | 0 | 15 |
+
 ### Consumo de CPU de las VMs
+
+Métrica *Percentage CPU*, agregación máximo, muestreo por minuto, durante la prueba de carga con 2 procesos en paralelo.
+
+| VM | Zona | Pico de CPU | Peticiones atendidas |
+|---|---|---|---|
+| VM1 | 1 | **95.70 %** | 10 |
+| VM2 | 2 | 1.1 % durante la prueba | 1 |
+| VM3 | 3 | **95.06 %** | 10 |
+
+Serie por minuto durante la ventana de la prueba:
+
+```
+VM1:  0.3  1.0  0.3  95.7  91.7
+VM2:  1.1  0.6  1.0   0.4   0.5
+VM3:  0.7 29.5 95.1  95.0   0.4
+```
+
+![CPU máxima de VM1 durante la prueba de carga](images/entrega/part2/13-cpu-vm1.png)
+
+![CPU máxima de VM2 durante la prueba de carga](images/entrega/part2/14-cpu-vm2.png)
+
+![CPU máxima de VM3 durante la prueba de carga](images/entrega/part2/15-cpu-vm3.png)
+
+Las gráficas abarcan un rango mayor que la prueba, por lo que el valor de VM2 (66.34 %) corresponde a una medición manual aislada previa y no al periodo de la prueba de newman, durante el cual permaneció por debajo del 1.1 %.
+
+#### Créditos de ráfaga
+
+`Standard_B1ls` es una VM **burstable**: dispone de un rendimiento base bajo y acumula créditos de CPU mientras está ociosa, que gasta al superar esa base. Si los créditos se agotan, Azure estrangula la máquina a su rendimiento base.
+
+![Créditos de CPU restantes en VM1](images/entrega/part2/16-cpu-credits-vm1.png)
+
+Durante la prueba los créditos de VM1 se mantuvieron alrededor de **30**, con un descenso leve y recuperación posterior. La conclusión es que **la prueba fue demasiado corta para agotarlos**, así que los picos del 95 % reflejan saturación real del núcleo y no degradación por falta de créditos.
+
+Esto importa para interpretar bien los resultados: bajo una carga **sostenida** en el tiempo, y no en ráfagas de dos minutos, estos nodos añadirían un segundo modo de falla, porque al vaciarse los créditos el rendimiento caería al nivel base y los tiempos de respuesta se dispararían aún más.
+
+#### Evaluación del escenario de calidad
+
+El escenario exige dos cosas a la vez: que **todas las peticiones sean respondidas** y que el **consumo de CPU no supere el 70 %**.
+
+| Criterio | Resultado | ¿Se cumple? |
+|---|---|---|
+| Todas las peticiones respondidas | 20 de 20, 0 fallos | **Sí** |
+| CPU del sistema por debajo del 70 % | Picos de 95.7 % y 95.1 % | **No** |
+
+El escenario **se cumple parcialmente**. La explicación está en la combinación de tres factores:
+
+1. **La aplicación es CPU-bound y monohilo.** Node.js procesa una petición por vez en el event loop, y el cálculo de Fibonacci con `big-integer` consume el núcleo completo mientras dura.
+2. **`Standard_B1ls` tiene un solo vCPU.** Basta una petición concurrente para saturarlo al 100 %. No hay margen para quedarse por debajo del 70 % mientras se atiende tráfico pesado.
+3. **La carga no se repartió entre los 3 nodos**, sino entre 2, por el hash de 5-tupla explicado arriba. VM2 permaneció ociosa al 0.4 % mientras VM1 y VM3 estaban al 95 %.
+
+Lo relevante es **qué sí resolvió el escalamiento horizontal**: la disponibilidad. Aunque cada nodo individual se saturó, **ninguna petición falló ni se perdió**, porque el trabajo se repartió entre máquinas independientes en lugar de acumularse en una sola. Con escalamiento vertical, todas las peticiones habrían competido por el mismo núcleo.
+
+Para cumplir también el criterio de CPU harían falta, o más nodos de los que hay peticiones concurrentes, o un tamaño de VM con varios núcleos, o reescribir la función de Fibonacci con un algoritmo eficiente, que es la causa raíz real del problema.
 
 ### Informe comparativo con la Parte 1
 
@@ -362,19 +492,136 @@ newman run ARSW_LOAD-BALANCING_AZURE.postman_collection.json -e "[ARSW_LOAD-BALA
 
 **1. ¿Cuáles son los tipos de balanceadores de carga en Azure y en qué se diferencian? ¿Qué es SKU, qué tipos hay y en qué se diferencian? ¿Por qué el balanceador de carga necesita una IP pública?**
 
+Azure ofrece cuatro servicios de balanceo, que se diferencian por la **capa del modelo OSI** en la que operan y por su **alcance geográfico**:
+
+| Servicio | Capa | Alcance | Decide según | Caso de uso |
+|---|---|---|---|---|
+| **Azure Load Balancer** | 4 (TCP/UDP) | Regional | IP y puerto | Tráfico TCP/UDP genérico dentro de una región. Es el que usa este laboratorio. |
+| **Application Gateway** | 7 (HTTP/S) | Regional | URL, host, cabeceras, cookies | Enrutamiento por ruta, terminación SSL, afinidad por cookie y firewall de aplicación (WAF). |
+| **Traffic Manager** | DNS | Global | Resolución DNS | Reparte entre regiones devolviendo distintas IPs. No ve el tráfico, solo resuelve nombres. |
+| **Front Door** | 7 | Global | URL y ubicación del cliente | Distribución global con caché de CDN, aceleración y WAF. |
+
+La diferencia esencial es que el **Load Balancer no entiende HTTP**: toma la decisión mirando únicamente la cabecera TCP. Esto lo hace muy rápido y agnóstico al protocolo, pero le impide enrutar por URL o leer cookies. Para este laboratorio es suficiente y es lo correcto, porque solo necesitamos repartir conexiones hacia un mismo servicio.
+
+**SKU** (*Stock Keeping Unit*) es el nivel de servicio del recurso: define capacidades, límites y precio.
+
+| SKU | Estado | Características |
+|---|---|---|
+| **Basic** | **Retirado el 30/09/2025** | Gratuito, sin soporte de zonas de disponibilidad, hasta 300 instancias, sin SLA. |
+| **Standard** | Vigente | Soporta zonas de disponibilidad, hasta 1000 instancias, SLA del 99.99 %, reglas de salida configurables y es *seguro por defecto*: todo el tráfico se bloquea salvo que un NSG lo permita explícitamente. |
+| **Gateway** | Vigente | Para encadenar appliances virtuales de red (NVA) de terceros. |
+
+En este laboratorio el SKU **Standard era obligatorio** por dos razones: Basic ya no existe, y es el único que permite distribuir las VMs en zonas de disponibilidad, que es un requisito del ejercicio.
+
+**Por qué necesita una IP pública:** porque se configuró como balanceador de tipo *Public*, es decir, el punto de entrada del sistema desde internet. La configuración de frontend necesita una dirección enrutable públicamente para que los clientes puedan alcanzarla; en nuestro caso `20.48.168.44`. Las VMs detrás solo tienen IPs privadas (`10.1.0.4` a `10.1.0.7`), que no son alcanzables desde fuera de la red virtual.
+
+En esta implementación esa IP cumple **una segunda función**: como las VMs no tienen IP pública propia, el balanceador les provee la salida a internet mediante SNAT a través de su frontend. Fue lo que permitió que las VMs descargaran Node.js y clonaran el repositorio.
+
 **2. ¿Cuál es el propósito del *Backend Pool*?**
+
+El backend pool es el **conjunto de instancias que atenderán el tráfico** que entre por el balanceador. En esta implementación, `SCALABILITY_LAB_BACKEND_POOL` agrupa las interfaces de red de VM1, VM2, VM3 y VM4.
+
+Su valor arquitectónico es el **desacoplamiento**: el cliente conoce una sola dirección estable (la IP del frontend) y nunca sabe cuántos nodos hay detrás ni cuáles son. Agregar o quitar máquinas es una operación sobre el pool que no obliga a tocar la regla de balanceo, ni la IP pública, ni la configuración del cliente.
+
+Eso es exactamente lo que hace posible la escalabilidad horizontal, y se comprobó en la práctica: **VM4 se agregó al sistema en caliente**, sin interrumpir el servicio, sin cambiar la IP `20.48.168.44` y sin reconfigurar nada del lado del cliente.
 
 **3. ¿Cuál es el propósito del *Health Probe*?**
 
+El health probe **verifica periódicamente que cada instancia del backend pool esté viva** y saca de rotación a las que no respondan, para que el balanceador no les envíe tráfico.
+
+Configuración usada:
+
+| Parámetro | Valor | Significado |
+|---|---|---|
+| Protocolo | TCP | Verifica que el puerto acepte conexiones |
+| Puerto | **3000** | El puerto donde escucha la aplicación, no el 80 del frontend |
+| Intervalo | 5 segundos | Frecuencia de la comprobación |
+| Umbral | 2 fallos | Comprobaciones fallidas consecutivas antes de marcar la instancia como no sana |
+
+El detalle importante es que **el probe apunta al 3000, no al 80**. El puerto 80 es donde escucha el balanceador de cara a internet; dentro de la red virtual la aplicación escucha en el 3000. Si el probe apuntara al 80, fallaría en todas las instancias y el balanceador vaciaría el pool completo.
+
+Se comprobó su funcionamiento de forma involuntaria durante el despliegue: mientras VM2 y VM3 todavía estaban instalando la aplicación, **el balanceador siguió respondiendo correctamente** porque el probe las tenía marcadas como no sanas y enviaba todo el tráfico a VM1, la única que ya tenía el servicio arriba. Sin health probe, un tercio de las peticiones habría fallado durante ese periodo.
+
 **4. ¿Cuál es el propósito de la *Load Balancing Rule*? ¿Qué tipos de sesión persistente existen, por qué esto es importante y cómo puede afectar la escalabilidad del sistema?**
+
+La regla de balanceo es la que **une todas las piezas**: asocia una configuración de frontend y un puerto de entrada con un backend pool y un puerto de destino, usando un health probe como criterio de salud.
+
+La regla `SCALABILITY_LAB_LOAD_BALANCING_RULE` define: TCP, puerto de frontend **80**, puerto de backend **3000**, pool `SCALABILITY_LAB_BACKEND_POOL`, probe `SCALABILITY_LAB_HEALTH_PROBE`. Es lo que permite consumir el servicio como `http://20.48.168.44/fibonacci/6` aunque internamente la aplicación viva en el 3000.
+
+**Tipos de sesión persistente en Azure Load Balancer:**
+
+| Tipo | Hash | Comportamiento |
+|---|---|---|
+| **None** (predeterminado) | 5-tupla: IP origen, puerto origen, IP destino, puerto destino, protocolo | Cada conexión nueva puede ir a un nodo distinto. Es la mejor distribución. |
+| **Client IP** | 2-tupla: IP origen, IP destino | Todas las conexiones de una misma IP cliente van siempre al mismo nodo. |
+| **Client IP and protocol** | 3-tupla: IP origen, IP destino, protocolo | Igual que la anterior, diferenciando por protocolo. |
+
+**Por qué importa:** si la aplicación guarda estado en memoria del servidor (una sesión de usuario, un carrito de compras), las peticiones de ese usuario deben llegar siempre al mismo nodo o el estado se pierde. La persistencia resuelve eso.
+
+**Cómo afecta la escalabilidad:** negativamente, y de forma severa. Con *Client IP*, todo el tráfico que venga detrás de un mismo NAT corporativo o universitario se concentra en un solo nodo, dejando el resto ociosos. Peor aún: al escalar, los nodos nuevos solo reciben clientes nuevos, nunca descargan a los que ya están saturados. Y si un nodo cae, sus usuarios pierden la sesión.
+
+Por eso se configuró **None**: la aplicación de Fibonacci es *stateless*, no guarda nada entre peticiones, así que no necesita afinidad y conviene repartir lo máximo posible.
+
+**Hallazgo experimental relevante:** incluso con persistencia en *None*, se observó afinidad de facto. El hash de 5-tupla se evalúa **por conexión TCP**, no por petición HTTP. Como `newman` mantiene la conexión viva (keep-alive) durante sus 10 iteraciones, las 10 peticiones viajaron por el mismo socket y cayeron todas en el mismo nodo. El resultado fue que **con 2 procesos solo se usaron 2 de las 3 VMs**, mientras la tercera quedaba ociosa al 0.4 % de CPU.
+
+La conclusión práctica es que, en un balanceador de capa 4, **el paralelismo real está limitado por el número de conexiones TCP que abra el cliente**, no por el tamaño del backend pool. Se verificó por contraste: lanzando 18 peticiones con `--no-keepalive`, el reparto fue exactamente 6, 6 y 6. Un Application Gateway, al operar en capa 7, sí distribuiría petición por petición sobre una misma conexión.
 
 **5. ¿Qué es una *Virtual Network*? ¿Qué es una *Subnet*? ¿Para qué sirven los *address space* y *address range*?**
 
+Una **Virtual Network (VNet)** es una red privada y aislada lógicamente dentro de Azure. Funciona como el equivalente en la nube de una red local: los recursos que viven dentro se comunican entre sí por direcciones privadas, sin pasar por internet, y están aislados del tráfico de otros clientes de Azure. Aquí es `SCALABILITY_LAB_VIRTUAL_NETWORK`.
+
+Una **Subnet** es una subdivisión de esa red. Sirve para segmentar: agrupar recursos con necesidades similares de conectividad y de seguridad, y aplicarles políticas distintas (NSG, tablas de rutas). En una arquitectura real se separarían la capa web, la de aplicación y la de base de datos en subredes distintas. En este laboratorio basta una, `SCALABILITY_LAB_SUBNET`, porque los 4 nodos son idénticos y cumplen la misma función.
+
+El **address space** es el rango total de direcciones IP privadas que la VNet reserva, expresado en notación CIDR. Aquí es `10.1.0.0/16`, que abarca de `10.1.0.0` a `10.1.255.255`, es decir 65.536 direcciones.
+
+El **address range** es la porción de ese espacio que se asigna a una subred concreta. Aquí es `10.1.0.0/24`, de `10.1.0.0` a `10.1.0.255`, 256 direcciones, de las cuales Azure reserva 5 (la primera, la última y tres para servicios internos), dejando 251 utilizables.
+
+Su propósito es doble: **evitar colisiones de direcciones**, tanto entre subredes como con redes locales en escenarios híbridos conectados por VPN, y **dimensionar** la capacidad de crecimiento. En este despliegue las VMs recibieron `10.1.0.4`, `10.1.0.5`, `10.1.0.6` y `10.1.0.7` dentro de ese rango.
+
 **6. ¿Qué son las *Availability Zone* y por qué seleccionamos 3 diferentes zonas? ¿Qué significa que una IP sea *zone-redundant*?**
+
+Una **Availability Zone** es una ubicación físicamente separada dentro de una misma región de Azure, con **alimentación eléctrica, refrigeración y red independientes**. Cada región que las soporta tiene al menos tres, separadas por una distancia suficiente para que un desastre localizado no afecte a más de una, pero conectadas por fibra de baja latencia para que se comporten como una sola red.
+
+**Por qué 3 zonas distintas:** para eliminar el punto único de falla a nivel de centro de datos. Si las tres VMs estuvieran en el mismo edificio, un corte de energía las tumbaría todas a la vez y el sistema caería completo, por más balanceador que hubiera. Repartidas en 3 zonas, la caída de una deja el sistema operando al 66 % de capacidad: el health probe detecta las instancias caídas en 10 segundos (2 fallos × 5 s de intervalo) y las saca de rotación, y el tráfico sigue fluyendo a las sobrevivientes.
+
+Es la diferencia entre escalar para **rendimiento** y escalar para **disponibilidad**. El backend pool da lo primero; distribuirlo en zonas da lo segundo.
+
+En este despliegue: VM1 en zona 1, VM2 en zona 2, VM3 en zona 3 y VM4 en zona 1.
+
+**Que una IP sea *zone-redundant*** significa que Azure la sirve **simultáneamente desde las tres zonas** en lugar de anclarla a una. Si una zona cae, la dirección sigue siendo alcanzable desde las otras dos, sin cambio de IP ni intervención manual.
+
+Esto es imprescindible aquí: de nada serviría tener las VMs repartidas en 3 zonas si la IP del balanceador, que es el único punto de entrada, viviera en una sola. La caída de esa zona dejaría el sistema inalcanzable aunque todos los nodos siguieran sanos. Por eso `SCALABILITY_LAB_LOAD_BALANCER_IP` se creó como **Standard, Static y Zone-redundant**. Nótese que solo el SKU Standard admite esta propiedad.
 
 **7. ¿Cuál es el propósito del *Network Security Group*?**
 
+El NSG es un **firewall distribuido con estado** que filtra el tráfico de red mediante reglas de 5-tupla (origen, puerto origen, destino, puerto destino, protocolo). Se puede asociar a una subred o a una interfaz de red; aquí `LOAD_BALANCER_NSG` está asociado a las 4 NICs.
+
+Reglas de entrada configuradas:
+
+| Prioridad | Nombre | Puerto | Propósito |
+|---|---|---|---|
+| 1000 | `default-allow-ssh` | 22 | Administración remota de las VMs |
+| 1010 | `Port_3000` | 3000 | Tráfico de la aplicación, que es el que reenvía el balanceador |
+
+Las reglas se evalúan **en orden de prioridad ascendente** y la primera que coincide gana. Además de las personalizadas, Azure añade reglas por defecto en prioridades altas, entre ellas `AllowAzureLoadBalancerInBound` (65001), que permite el tráfico del balanceador, **incluidos los health probes**, y `DenyAllInBound` (65500), que bloquea todo lo demás.
+
+Por qué es necesario aquí: el SKU **Standard es cerrado por defecto**. Sin una regla explícita que abra el 3000, el health probe no podría alcanzar la aplicación, marcaría las cuatro instancias como no sanas y el balanceador devolvería error aunque la aplicación estuviera funcionando perfectamente. El NSG es, por tanto, un requisito funcional del sistema, no solo una medida de seguridad.
+
 **8. Informe de newman 1 (Punto 2)**
+
+Los resultados completos están en la sección [Prueba de newman con 2 procesos en paralelo](#prueba-de-newman-con-2-procesos-en-paralelo) de las evidencias. Resumen:
+
+| Métrica | Valor |
+|---|---|
+| Peticiones totales | 20 (2 procesos × 10 iteraciones) |
+| Peticiones exitosas | **20 (100 %)** |
+| Peticiones fallidas | **0** |
+| Tiempo de respuesta promedio | 12.3 s y 12.7 s |
+| Rango | 12.2 s a 13.5 s |
+| Desviación estándar | 54 ms y 458 ms |
+| Pico de CPU en los nodos con carga | 95.7 % y 95.1 % |
+
+La interpretación está desarrollada en [Evaluación del escenario de calidad](#evaluación-del-escenario-de-calidad): el requisito de **responder todas las peticiones se cumple**, el de **mantener la CPU por debajo del 70 % no**, y la causa de fondo es el algoritmo de Fibonacci, no la infraestructura.
 
 ---
 
