@@ -18,6 +18,7 @@
 - [Parte 1: Escalabilidad vertical](#parte-1-escalabilidad-vertical)
   - [Checklist](#checklist-parte-1)
   - [Cambios frente a la guía](#cambios-frente-a-la-guía-parte-1)
+  - [Video](#video-parte-1)
   - [Evidencias](#evidencias-parte-1)
   - [Preguntas](#preguntas-parte-1)
 - [Parte 2: Escalabilidad horizontal](#parte-2-escalabilidad-horizontal)
@@ -55,7 +56,7 @@
 - [x] Repetir los tiempos, la gráfica de CPU y la prueba de newman
 - [x] Evaluar si se cumple el escenario de calidad
 - [x] Correr newman con 4 procesos en paralelo (pregunta 11)
-- [ ] Devolver la VM al tamaño inicial `D1_v2` para no gastar créditos (lo mostramos en el video)
+- [x] Dejar de gastar créditos: en vez de devolver la VM a `D1_v2`, borramos todo el grupo de recursos después de grabar el video
 
 Este es el comando de carga que usamos, desde `FibonacciApp/postman/part1`:
 
@@ -82,6 +83,12 @@ La Parte 1 la hicimos en la suscripción de *Azure for Students* de Paula, que e
 | Imagen | Ubuntu Server 18.04 | Ubuntu Server 24.04 LTS, Gen1 | D1_v2 solo acepta imágenes de generación 1 y el portal no nos ofrecía Ubuntu 22.04 en Gen1. La 18.04 ya ni existe en el Marketplace. |
 
 Algo bueno de este cambio: los tamaños Dv2 no son burstable, o sea que dan el 100 % de su CPU todo el tiempo, sin depender de créditos. Eso nos quita una variable de encima y hace que la comparación entre los dos tamaños sea más limpia. El experimento sigue siendo el mismo de la guía: una VM de 1 vCPU que escalamos a 2 vCPU.
+
+## Video: Parte 1
+
+Aquí está el video donde mostramos la Parte 1 funcionando en Azure, con la explicación de cada paso: [ver el video en YouTube](https://youtu.be/x3GjDqmcOo0)
+
+En el video recorremos todo lo de Azure: los recursos que se crearon, la regla del puerto 3000, la aplicación respondiendo, las pruebas con newman y el cambio de tamaño de D1_v2 a D2_v2 en vivo. Lo que no alcanzamos a mostrar ahí (las métricas completas, las tablas y el análisis de los fallos) está explicado con detalle en este documento.
 
 ## Evidencias: Parte 1
 
@@ -261,9 +268,9 @@ Aquí lanzamos cuatro procesos de newman al mismo tiempo contra la VM en D2_v2. 
 
 Respondió 25 de 40, el 62.5 %. Todos los fallos fueron otra vez `read ECONNRESET`.
 
-### VM devuelta a D1_v2
+### Limpieza de la VM
 
-El regreso a `Standard_D1_v2` lo mostramos en vivo en el video, junto con lo que le pasa a la aplicación durante el cambio.
+La guía pide devolver la VM a `Standard_D1_v2` al final para no gastar créditos. Como ya teníamos todas las evidencias y el video grabado, preferimos borrar todo el grupo de recursos `SCALABILITY_LAB`, que deja de cobrar del todo.
 
 ## Preguntas: Parte 1
 
@@ -295,7 +302,7 @@ La clave SSH aparece como recurso porque la generamos desde el portal. Si subes 
 
 **3. ¿Al cerrar la conexión ssh con la VM, por qué se cae la aplicación que ejecutamos con el comando `npm FibonacciApp.js`? ¿Por qué debemos crear un *Inbound port rule* antes de acceder al servicio?**
 
-Porque el proceso `node FibonacciApp.js` es hijo de la sesión de la terminal que abrimos por SSH. Cuando cerramos la conexión, Linux le manda la señal `SIGHUP` (*hang up*) a todos los procesos de esa sesión, y Node, como no la maneja, se cierra. El proceso nunca fue independiente: estaba amarrado a la terminal. En el video lo mostramos en vivo: cerramos la ventana de SSH, recargamos el navegador y la app ya no responde.
+Porque el proceso `node FibonacciApp.js` es hijo de la sesión de la terminal que abrimos por SSH. Cuando cerramos la conexión, Linux le manda la señal `SIGHUP` (*hang up*) a todos los procesos de esa sesión, y Node, como no la maneja, se cierra. El proceso nunca fue independiente: estaba amarrado a la terminal. Por eso, si cerramos la ventana de SSH y recargamos el navegador, la app ya no responde.
 
 Para que no pase, hay que despegar el proceso de la sesión. Nosotras usamos `forever start FibonacciApp.js`, que corre el proceso aparte de la terminal y además lo vuelve a levantar si se cae. También sirven `pm2`, `nohup node FibonacciApp.js &` o un servicio de `systemd`, que fue lo que usamos en la Parte 2.
 
@@ -449,8 +456,8 @@ El escalamiento vertical no nos arregla el problema porque el cuello de botella 
 
 ### Limpieza de la Parte 1
 
-- [ ] VM devuelta a `Standard_D1_v2` (paso 13 de la guía, lo mostramos en el video)
-- [ ] Grupo de recursos `SCALABILITY_LAB` borrado después de entregar el video
+- [x] Video grabado y publicado en YouTube
+- [x] Grupo de recursos `SCALABILITY_LAB` borrado después de grabar el video (en vez de devolver la VM a `D1_v2`)
 
 ---
 
