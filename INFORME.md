@@ -16,8 +16,7 @@
 ## Tabla de contenido
 
 - [Parte 1: Escalabilidad vertical](#parte-1-escalabilidad-vertical)
-  - [Checklist](#checklist-parte-1)
-  - [Cambios frente a la guía](#cambios-frente-a-la-guía-parte-1)
+  - [Prueba de carga](#prueba-de-carga-parte-1)
   - [Video](#video-parte-1)
   - [Evidencias](#evidencias-parte-1)
   - [Preguntas](#preguntas-parte-1)
@@ -27,36 +26,12 @@
   - [Preguntas](#preguntas-parte-2)
 - [Diagrama de despliegue](#diagrama-de-despliegue)
 - [Conclusiones](#conclusiones)
-- [Limpieza de recursos](#limpieza-de-recursos)
 
 ---
 
 # Parte 1: Escalabilidad vertical
 
-## Checklist: Parte 1
-
-**Creación de la VM**
-- [x] Crear la VM: Resource Group `SCALABILITY_LAB`, nombre `VERTICAL-SCALABILITY`, usuario `scalability_lab`, autenticación con llave SSH (el tamaño y la imagen cambiaron, ver [cambios frente a la guía](#cambios-frente-a-la-guía-parte-1))
-- [x] Conectarnos por SSH: `ssh scalability_lab@<IP_PUBLICA>`
-- [x] Instalar Node.js con NVM
-- [x] Clonar el repositorio y correr `npm install` dentro de `FibonacciApp`
-- [x] Correr la aplicación: `node FibonacciApp.js`
-- [x] Crear la Inbound port rule para el puerto `3000` en *Networking*
-- [x] Verificar que `http://<IP_PUBLICA>:3000/fibonacci/6` responda `The answer is 8`
-
-**Mediciones con el tamaño pequeño (D1_v2)**
-- [x] Medir los tiempos desde la consola del navegador para: 1000000, 1010000, 1020000, 1030000, 1040000, 1050000, 1060000, 1070000, 1080000, 1090000
-- [x] Sacar la gráfica de CPU de la VM en Azure
-- [x] Instalar newman en una máquina distinta a la VM: `npm install newman -g`
-- [x] En `FibonacciApp/postman/part1/[ARSW_LOAD-BALANCING_AZURE].postman_environment.json` cambiar `VM1` por la IP de la VM
-- [x] Correr la prueba de carga con 2 procesos en paralelo y guardar el resumen
-
-**Escalamiento vertical**
-- [x] Cambiar el tamaño de la VM a `D2_v2` (sección *Size*)
-- [x] Repetir los tiempos, la gráfica de CPU y la prueba de newman
-- [x] Evaluar si se cumple el escenario de calidad
-- [x] Correr newman con 4 procesos en paralelo (pregunta 11)
-- [x] Dejar de gastar créditos: en vez de devolver la VM a `D1_v2`, borramos todo el grupo de recursos después de grabar el video
+## Prueba de carga: Parte 1
 
 Este es el comando de carga que usamos, desde `FibonacciApp/postman/part1`:
 
@@ -70,19 +45,6 @@ newman run ARSW_LOAD-BALANCING_AZURE.postman_collection.json -e "[ARSW_LOAD-BALA
 > ```powershell
 > Start-Process newman -ArgumentList 'run','ARSW_LOAD-BALANCING_AZURE.postman_collection.json','-e','[ARSW_LOAD-BALANCING_AZURE].postman_environment.json','-n','10'
 > ```
-
-## Cambios frente a la guía: Parte 1
-
-La Parte 1 la hicimos en la suscripción de *Azure for Students* de Paula, que es distinta a la de la Parte 2 y tiene sus propias restricciones. Por eso nos tocó cambiar algunas cosas:
-
-| Qué | La guía pide | Lo que usamos | Por qué |
-|---|---|---|---|
-| Tamaño pequeño | `Standard_B1ls` | `Standard_D1_v2` (1 vCPU, 3.5 GiB) | La suscripción tiene bloqueada toda la serie B (`B1ls`, `B1s`, `B1ms`, `B2s`, `B2ms`) en las 5 regiones que deja usar (`chilecentral`, `eastus`, `eastus2`, `canadacentral`, `southcentralus`). Aparecen como `NotAvailableForSubscription`. Lo revisamos con `az vm list-skus` y con la API de SKUs de Azure. |
-| Tamaño grande | `Standard_B2ms` | `Standard_D2_v2` (2 vCPU, 7 GiB) | Por lo mismo. Escogimos D1_v2 y D2_v2 porque repiten justo el salto de 1 a 2 vCPU de la guía y los dos están disponibles en la misma región, así que el cambio de tamaño sí funciona. |
-| Región | No dice | Chile Central | Era la única región permitida que tenía esos dos tamaños en x64. |
-| Imagen | Ubuntu Server 18.04 | Ubuntu Server 24.04 LTS, Gen1 | D1_v2 solo acepta imágenes de generación 1 y el portal no nos ofrecía Ubuntu 22.04 en Gen1. La 18.04 ya ni existe en el Marketplace. |
-
-Algo bueno de este cambio: los tamaños Dv2 no son burstable, o sea que dan el 100 % de su CPU todo el tiempo, sin depender de créditos. Eso nos quita una variable de encima y hace que la comparación entre los dos tamaños sea más limpia. El experimento sigue siendo el mismo de la guía: una VM de 1 vCPU que escalamos a 2 vCPU.
 
 ## Video: Parte 1
 
@@ -456,8 +418,7 @@ El escalamiento vertical no nos arregla el problema porque el cuello de botella 
 
 ### Limpieza de la Parte 1
 
-- [x] Video grabado y publicado en YouTube
-- [x] Grupo de recursos `SCALABILITY_LAB` borrado después de grabar el video (en vez de devolver la VM a `D1_v2`)
+Una vez grabado y publicado el video en YouTube, borramos el grupo de recursos `SCALABILITY_LAB` completo, en vez de devolver la VM a `D1_v2` como pedía la guía.
 
 ---
 
@@ -695,7 +656,7 @@ Para cumplir también el criterio de CPU harían falta, o más nodos de los que 
 
 ### Informe comparativo con la Parte 1
 
-Probamos las dos infraestructuras con la misma colección de newman (`n = 1000000`, 2 procesos de 10 iteraciones cada uno). Recuerden que en la Parte 1 usamos `D1_v2` y `D2_v2` en vez de `B1ls` y `B2ms` (ver [cambios de la Parte 1](#cambios-frente-a-la-guía-parte-1)).
+Probamos las dos infraestructuras con la misma colección de newman (`n = 1000000`, 2 procesos de 10 iteraciones cada uno). Recuerden que en la Parte 1 usamos `D1_v2` y `D2_v2` en vez de `B1ls` y `B2ms`, porque la suscripción donde la hicimos tenía bloqueada toda la serie B. El experimento es el mismo: una VM de 1 vCPU que escalamos a 2 vCPU.
 
 | | Vertical: 1 VM D1_v2 | Vertical: 1 VM D2_v2 | Horizontal: 3 VMs B1ls con balanceador |
 |---|---|---|---|
@@ -1044,11 +1005,3 @@ Ninguna alteró la arquitectura evaluada, pero todas confirman que **una arquite
 **6. Disponibilidad por zonas.**
 
 Distribuir los nodos en 3 zonas de disponibilidad y usar una IP zone-redundant protege contra la caída de un centro de datos completo. Con el health probe configurado a 5 segundos de intervalo y umbral de 2, el sistema detecta y aísla un nodo caído en unos **10 segundos**, y sigue operando con capacidad reducida en lugar de caer por completo.
-
----
-
-# Limpieza de recursos
-
-- [ ] En el portal de Azure: *Resource groups*, luego `SCALABILITY_LAB` y luego **Delete resource group**
-
-Esto elimina en una sola operación el Load Balancer, la IP pública, la Virtual Network, el NSG, las VMs, sus discos y sus NIC.
